@@ -16,7 +16,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
-	"github.com/joho/godotenv"
 )
 
 const (
@@ -147,10 +146,6 @@ func tickCmd() tea.Cmd {
 }
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		log.Println(".env not found, using system environment variables")
-	}
-
 	if len(os.Args) == 1 {
 		printHome()
 		return
@@ -162,20 +157,23 @@ func main() {
 		return
 	}
 
-	postgres := storage.NewPostgresDB()
+	store, err := storage.NewDefaultStore()
+	if err != nil {
+		log.Fatal("failed to open local storage:", err)
+	}
 	defer func() {
-		if err := postgres.Close(); err != nil {
-			log.Println("failed to close PostgreSQL connection:", err)
+		if err := store.Close(); err != nil {
+			log.Println("failed to close storage:", err)
 		}
 	}()
 
 	switch command {
 	case "search":
-		runSearch(postgres, os.Args[2:])
+		runSearch(store, os.Args[2:])
 	case "crawl":
-		runCrawl(postgres, os.Args[2:])
+		runCrawl(store, os.Args[2:])
 	case "show":
-		runShow(postgres, os.Args[2:])
+		runShow(store, os.Args[2:])
 	default:
 		fmt.Printf("Неизвестная команда: %s\n\n", command)
 		printHelp()
@@ -214,13 +212,13 @@ func printHelp() {
 `)
 }
 
-func runSearch(postgres *storage.Postgres, args []string) {
+func runSearch(store storage.Store, args []string) {
 	if len(args) == 0 {
 		log.Fatal("Использование: itmowiki search <запрос>")
 	}
 
 	query := strings.Join(args, " ")
-	results, err := postgres.SearchPages(query)
+	results, err := store.SearchPages(query)
 	if err != nil {
 		log.Fatal("search failed:", err)
 	}
@@ -242,7 +240,7 @@ func runSearch(postgres *storage.Postgres, args []string) {
 	}
 }
 
-func runShow(postgres *storage.Postgres, args []string) {
+func runShow(store storage.Store, args []string) {
 	if len(args) != 1 {
 		log.Fatal("Использование: itmowiki show <id>")
 	}
@@ -252,7 +250,7 @@ func runShow(postgres *storage.Postgres, args []string) {
 		log.Fatal("id должен быть числом")
 	}
 
-	page, err := postgres.GetPageByID(id)
+	page, err := store.GetPageByID(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		log.Fatalf("страница с id %d не найдена", id)
 	}
@@ -273,7 +271,7 @@ func runShow(postgres *storage.Postgres, args []string) {
 	fmt.Println(rendered)
 }
 
-func runCrawl(postgres *storage.Postgres, args []string) {
+func runCrawl(store storage.Store, args []string) {
 	startURL := defaultCrawlURL
 	limit := defaultCrawlLimit
 	if len(args) >= 1 {
@@ -290,7 +288,16 @@ func runCrawl(postgres *storage.Postgres, args []string) {
 		log.Fatal("Использование: itmowiki crawl [url] [limit]")
 	}
 
-	crawlerService := service.NewService(postgres)
+	crawlerService := service.NewService(store)
+	if !isTerminal(os.Stdout) {
+		pages, err := crawlerService.Crawl(startURL, limit)
+		if err != nil {
+			log.Fatal("crawl failed:", err)
+		}
+		fmt.Printf("Обработано страниц: %d\n", len(pages))
+		return
+	}
+
 	model := crawlModel{
 		crawler:  crawlerService,
 		startURL: startURL,
@@ -317,4 +324,12 @@ func shortText(text string, maxLen int) string {
 	}
 
 	return string(runes[:maxLen-3]) + "..."
+}
+
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
