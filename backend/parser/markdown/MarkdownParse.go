@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"fmt"
 	stdhtml "html"
 	"strings"
 	"unicode"
@@ -284,10 +285,14 @@ func render(n *node) string {
 		return "\n\n" + renderBlockquote(cleanup(renderChildren(n.children))) + "\n\n"
 	case "img":
 		src := strings.TrimSpace(n.attrs["src"])
+		alt := strings.TrimSpace(n.attrs["alt"])
+		if looksLikeTex(alt) {
+			return normalizeMathText(alt)
+		}
 		if src == "" {
 			return ""
 		}
-		return "![" + escapeLinkText(n.attrs["alt"]) + "](" + src + ")"
+		return "![" + escapeLinkText(alt) + "](" + src + ")"
 	case "table":
 		return renderTable(n)
 	default:
@@ -425,7 +430,7 @@ func normalizeTextNode(text string) string {
 
 	hasLeadingSpace := unicode.IsSpace(rune(text[0]))
 	hasTrailingSpace := unicode.IsSpace(rune(text[len(text)-1]))
-	text = normalizeInline(text)
+	text = normalizeInline(normalizeMathText(text))
 	if hasLeadingSpace {
 		text = " " + text
 	}
@@ -434,6 +439,224 @@ func normalizeTextNode(text string) string {
 	}
 
 	return text
+}
+
+var texReplacer = strings.NewReplacer(
+	"\\leftrightarrow", "<->",
+	"\\Leftrightarrow", "<=>",
+	"\\rightarrow", "->",
+	"\\Rightarrow", "=>",
+	"\\leftarrow", "<-",
+	"\\Leftarrow", "<=",
+	"\\longleftrightarrow", "<->",
+	"\\Longleftrightarrow", "<=>",
+	"\\longrightarrow", "->",
+	"\\Longrightarrow", "=>",
+	"\\longleftarrow", "<-",
+	"\\Longleftarrow", "<=",
+	"\\mapsto", "|->",
+	"\\iff", "<=>",
+	"\\to", "->",
+	"\\gets", "<-",
+	"\\infty", "∞",
+	"\\leq", "<=",
+	"\\le", "<=",
+	"\\geq", ">=",
+	"\\ge", ">=",
+	"\\neq", "!=",
+	"\\ne", "!=",
+	"\\equiv", "===",
+	"\\approx", "~",
+	"\\sim", "~",
+	"\\cdot", "*",
+	"\\times", "*",
+	"\\div", "/",
+	"\\pm", "+/-",
+	"\\mp", "-/+",
+	"\\land", "∧",
+	"\\wedge", "∧",
+	"\\lor", "∨",
+	"\\vee", "∨",
+	"\\neg", "¬",
+	"\\lnot", "¬",
+	"\\forall", "∀",
+	"\\exists", "∃",
+	"\\nexists", "∄",
+	"\\in", "∈",
+	"\\notin", "∉",
+	"\\ni", "∋",
+	"\\subseteq", "⊆",
+	"\\subset", "⊂",
+	"\\supseteq", "⊇",
+	"\\supset", "⊃",
+	"\\cup", "∪",
+	"\\cap", "∩",
+	"\\emptyset", "∅",
+	"\\varnothing", "∅",
+	"\\nabla", "∇",
+	"\\partial", "∂",
+	"\\sum", "Σ",
+	"\\prod", "Π",
+	"\\int", "∫",
+	"\\alpha", "α",
+	"\\beta", "β",
+	"\\gamma", "γ",
+	"\\Gamma", "Γ",
+	"\\delta", "δ",
+	"\\Delta", "Δ",
+	"\\epsilon", "ε",
+	"\\varepsilon", "ε",
+	"\\zeta", "ζ",
+	"\\eta", "η",
+	"\\theta", "θ",
+	"\\Theta", "Θ",
+	"\\lambda", "λ",
+	"\\Lambda", "Λ",
+	"\\mu", "μ",
+	"\\nu", "ν",
+	"\\xi", "ξ",
+	"\\Xi", "Ξ",
+	"\\pi", "π",
+	"\\Pi", "Π",
+	"\\rho", "ρ",
+	"\\sigma", "σ",
+	"\\Sigma", "Σ",
+	"\\tau", "τ",
+	"\\phi", "φ",
+	"\\varphi", "φ",
+	"\\Phi", "Φ",
+	"\\omega", "ω",
+	"\\Omega", "Ω",
+	"\\ldots", "...",
+	"\\dots", "...",
+	"\\quad", " ",
+	"\\qquad", " ",
+)
+
+func normalizeMathText(text string) string {
+	if !looksLikeTex(text) {
+		return text
+	}
+
+	text = replaceTexCommandWithTwoGroups(text, "\\frac", "(%s)/(%s)")
+	text = replaceTexCommandWithOneGroup(text, "\\sqrt", "sqrt(%s)")
+	text = replaceTexCommandWithOneGroup(text, "\\overline", "overline(%s)")
+	text = replaceTexCommandWithOneGroup(text, "\\underline", "underline(%s)")
+	text = replaceTexCommandWithOneGroup(text, "\\text", "%s")
+	text = replaceTexCommandWithOneGroup(text, "\\mathrm", "%s")
+	text = replaceTexCommandWithOneGroup(text, "\\mathbf", "%s")
+	text = replaceTexCommandWithOneGroup(text, "\\mathit", "%s")
+	text = texReplacer.Replace(text)
+
+	for _, command := range []string{
+		"\\math",
+		"\\displaystyle",
+		"\\textstyle",
+		"\\scriptstyle",
+		"\\scriptscriptstyle",
+		"\\left",
+		"\\right",
+		"\\,",
+		"\\;",
+		"\\:",
+		"\\!",
+	} {
+		text = strings.ReplaceAll(text, command, "")
+	}
+
+	text = normalizeGroupedScripts(text)
+	return strings.TrimSpace(normalizeInline(text))
+}
+
+func looksLikeTex(text string) bool {
+	return strings.Contains(text, "\\") || strings.Contains(text, "^{") || strings.Contains(text, "_{")
+}
+
+func replaceTexCommandWithOneGroup(text string, command string, format string) string {
+	for {
+		start := strings.Index(text, command+"{")
+		if start == -1 {
+			return text
+		}
+
+		groupStart := start + len(command)
+		group, end, ok := readBraceGroup(text, groupStart)
+		if !ok {
+			return text
+		}
+
+		replacement := formatTexGroup(format, normalizeMathText(group))
+		text = text[:start] + replacement + text[end:]
+	}
+}
+
+func replaceTexCommandWithTwoGroups(text string, command string, format string) string {
+	for {
+		start := strings.Index(text, command+"{")
+		if start == -1 {
+			return text
+		}
+
+		first, firstEnd, ok := readBraceGroup(text, start+len(command))
+		if !ok {
+			return text
+		}
+		second, secondEnd, ok := readBraceGroup(text, firstEnd)
+		if !ok {
+			return text
+		}
+
+		replacement := formatTexGroup(format, normalizeMathText(first), normalizeMathText(second))
+		text = text[:start] + replacement + text[secondEnd:]
+	}
+}
+
+func formatTexGroup(format string, values ...any) string {
+	return strings.TrimSpace(strings.ReplaceAll(fmt.Sprintf(format, values...), "  ", " "))
+}
+
+func readBraceGroup(text string, start int) (string, int, bool) {
+	for start < len(text) && unicode.IsSpace(rune(text[start])) {
+		start++
+	}
+	if start >= len(text) || text[start] != '{' {
+		return "", start, false
+	}
+
+	depth := 0
+	for i := start; i < len(text); i++ {
+		switch text[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return text[start+1 : i], i + 1, true
+			}
+		}
+	}
+
+	return "", start, false
+}
+
+func normalizeGroupedScripts(text string) string {
+	for {
+		index := strings.IndexAny(text, "_^")
+		if index == -1 || index+1 >= len(text) {
+			return text
+		}
+		if text[index+1] != '{' {
+			next := index + 1
+			text = text[:next] + normalizeGroupedScripts(text[next:])
+			return text
+		}
+
+		group, end, ok := readBraceGroup(text, index+1)
+		if !ok {
+			return text
+		}
+		text = text[:index+1] + "(" + normalizeMathText(group) + ")" + text[end:]
+	}
 }
 
 func cleanup(markdown string) string {
