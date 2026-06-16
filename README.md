@@ -1,4 +1,4 @@
-<img width="397" height="120" alt="image" src="https://github.com/user-attachments/assets/7e8f459f-6150-49e5-b292-936138f64787" />
+<img width="386" height="107" alt="image" src="https://github.com/user-attachments/assets/af8dfd56-017c-433a-812f-71e0c0016686" />
 
 
 `itmowiki` is a terminal-based search tool for ITMO Wikiconspects.
