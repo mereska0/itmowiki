@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,25 +8,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mereska0/itmowiki/internal/domain"
 )
-
-type Store interface {
-	SavePage(title string, url string, html []byte) (int, error)
-	SaveDiscoveredPage(url string) (int, error)
-	GetPage(url string) (int, []byte, bool, error)
-	SearchPages(query string) ([]Page, error)
-	GetPageByID(id int) (Page, error)
-	SaveKeyword(pageID int, keyword string, count int) error
-	SaveLink(fromID int, toID int, link string) error
-	Close() error
-}
-
-type Page struct {
-	ID    int
-	Title string
-	URL   string
-	HTML  []byte
-}
 
 type LocalStore struct {
 	mu   sync.Mutex
@@ -56,10 +39,6 @@ type localLink struct {
 	Link   string `json:"link"`
 }
 
-func NewDefaultStore() (Store, error) {
-	return NewLocalStore(defaultLocalStorePath())
-}
-
 func NewLocalStore(path string) (*LocalStore, error) {
 	store := &LocalStore{
 		path: path,
@@ -77,7 +56,7 @@ func NewLocalStore(path string) (*LocalStore, error) {
 	return store, nil
 }
 
-func defaultLocalStorePath() string {
+func DefaultLocalStorePath() string {
 	if path := os.Getenv("ITMOWIKI_DB_PATH"); path != "" {
 		return path
 	}
@@ -197,12 +176,12 @@ func (s *LocalStore) GetPage(url string) (int, []byte, bool, error) {
 	return page.ID, []byte(page.HTML), page.CrawledAt != nil, nil
 }
 
-func (s *LocalStore) SearchPages(query string) ([]Page, error) {
+func (s *LocalStore) SearchPages(query string) ([]domain.Page, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	query = strings.ToLower(query)
-	pages := []Page{}
+	pages := []domain.Page{}
 	for _, page := range s.data.Pages {
 		if page.CrawledAt == nil {
 			continue
@@ -210,7 +189,7 @@ func (s *LocalStore) SearchPages(query string) ([]Page, error) {
 		if !s.pageMatchesQuery(page, query) {
 			continue
 		}
-		pages = append(pages, Page{
+		pages = append(pages, domain.Page{
 			ID:    page.ID,
 			Title: page.Title,
 			URL:   page.URL,
@@ -226,13 +205,13 @@ func (s *LocalStore) SearchPages(query string) ([]Page, error) {
 	return pages, nil
 }
 
-func (s *LocalStore) GetPageByID(id int) (Page, error) {
+func (s *LocalStore) GetPageByID(id int) (domain.Page, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, page := range s.data.Pages {
 		if page.ID == id && page.CrawledAt != nil {
-			return Page{
+			return domain.Page{
 				ID:    page.ID,
 				Title: page.Title,
 				URL:   page.URL,
@@ -240,7 +219,7 @@ func (s *LocalStore) GetPageByID(id int) (Page, error) {
 			}, nil
 		}
 	}
-	return Page{}, sql.ErrNoRows
+	return domain.Page{}, domain.ErrPageNotFound
 }
 
 func (s *LocalStore) SaveKeyword(pageID int, keyword string, count int) error {

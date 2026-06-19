@@ -3,6 +3,7 @@ package markdown
 import (
 	"fmt"
 	stdhtml "html"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -441,103 +442,116 @@ func normalizeTextNode(text string) string {
 	return text
 }
 
-var texReplacer = strings.NewReplacer(
-	"\\leftrightarrow", "<->",
-	"\\Leftrightarrow", "<=>",
-	"\\rightarrow", "->",
-	"\\Rightarrow", "=>",
-	"\\leftarrow", "<-",
-	"\\Leftarrow", "<=",
-	"\\longleftrightarrow", "<->",
-	"\\Longleftrightarrow", "<=>",
-	"\\longrightarrow", "->",
-	"\\Longrightarrow", "=>",
-	"\\longleftarrow", "<-",
-	"\\Longleftarrow", "<=",
-	"\\mapsto", "|->",
-	"\\iff", "<=>",
-	"\\to", "->",
-	"\\gets", "<-",
-	"\\infty", "∞",
-	"\\leq", "<=",
-	"\\le", "<=",
-	"\\geq", ">=",
-	"\\ge", ">=",
-	"\\neq", "!=",
-	"\\ne", "!=",
-	"\\equiv", "===",
-	"\\approx", "~",
-	"\\sim", "~",
-	"\\cdot", "*",
-	"\\times", "*",
-	"\\div", "/",
-	"\\pm", "+/-",
-	"\\mp", "-/+",
-	"\\land", "∧",
-	"\\wedge", "∧",
-	"\\lor", "∨",
-	"\\vee", "∨",
-	"\\neg", "¬",
-	"\\lnot", "¬",
-	"\\forall", "∀",
-	"\\exists", "∃",
-	"\\nexists", "∄",
-	"\\in", "∈",
-	"\\notin", "∉",
-	"\\ni", "∋",
-	"\\subseteq", "⊆",
-	"\\subset", "⊂",
-	"\\supseteq", "⊇",
-	"\\supset", "⊃",
-	"\\cup", "∪",
-	"\\cap", "∩",
-	"\\emptyset", "∅",
-	"\\varnothing", "∅",
-	"\\nabla", "∇",
-	"\\partial", "∂",
-	"\\sum", "Σ",
-	"\\prod", "Π",
-	"\\int", "∫",
-	"\\alpha", "α",
-	"\\beta", "β",
-	"\\gamma", "γ",
-	"\\Gamma", "Γ",
-	"\\delta", "δ",
-	"\\Delta", "Δ",
-	"\\epsilon", "ε",
-	"\\varepsilon", "ε",
-	"\\zeta", "ζ",
-	"\\eta", "η",
-	"\\theta", "θ",
-	"\\Theta", "Θ",
-	"\\lambda", "λ",
-	"\\Lambda", "Λ",
-	"\\mu", "μ",
-	"\\nu", "ν",
-	"\\xi", "ξ",
-	"\\Xi", "Ξ",
-	"\\pi", "π",
-	"\\Pi", "Π",
-	"\\rho", "ρ",
-	"\\sigma", "σ",
-	"\\Sigma", "Σ",
-	"\\tau", "τ",
-	"\\phi", "φ",
-	"\\varphi", "φ",
-	"\\Phi", "Φ",
-	"\\omega", "ω",
-	"\\Omega", "Ω",
-	"\\ldots", "...",
-	"\\dots", "...",
-	"\\quad", " ",
-	"\\qquad", " ",
-)
+var texReplacer = newTexReplacer([][2]string{
+	{"\\leftrightarrow", "<->"},
+	{"\\Leftrightarrow", "<=>"},
+	{"\\rightarrow", "->"},
+	{"\\Rightarrow", "=>"},
+	{"\\leftarrow", "<-"},
+	{"\\Leftarrow", "<="},
+	{"\\longleftrightarrow", "<->"},
+	{"\\Longleftrightarrow", "<=>"},
+	{"\\longrightarrow", "->"},
+	{"\\Longrightarrow", "=>"},
+	{"\\longleftarrow", "<-"},
+	{"\\Longleftarrow", "<="},
+	{"\\mapsto", "|->"},
+	{"\\iff", "<=>"},
+	{"\\to", "->"},
+	{"\\gets", "<-"},
+	{"\\infty", "∞"},
+	{"\\leq", "<="},
+	{"\\le", "<="},
+	{"\\geq", ">="},
+	{"\\ge", ">="},
+	{"\\neq", "!="},
+	{"\\ne", "!="},
+	{"\\equiv", "==="},
+	{"\\approx", "~"},
+	{"\\sim", "~"},
+	{"\\cdot", "*"},
+	{"\\times", "*"},
+	{"\\div", "/"},
+	{"\\pm", "+/-"},
+	{"\\mp", "-/+"},
+	{"\\land", "∧"},
+	{"\\wedge", "∧"},
+	{"\\lor", "∨"},
+	{"\\vee", "∨"},
+	{"\\neg", "¬"},
+	{"\\lnot", "¬"},
+	{"\\forall", "∀"},
+	{"\\exists", "∃"},
+	{"\\nexists", "∄"},
+	{"\\in", "∈"},
+	{"\\notin", "∉"},
+	{"\\ni", "∋"},
+	{"\\subseteq", "⊆"},
+	{"\\subset", "⊂"},
+	{"\\supseteq", "⊇"},
+	{"\\supset", "⊃"},
+	{"\\cup", "∪"},
+	{"\\cap", "∩"},
+	{"\\emptyset", "∅"},
+	{"\\varnothing", "∅"},
+	{"\\nabla", "∇"},
+	{"\\partial", "∂"},
+	{"\\sum", "Σ"},
+	{"\\prod", "Π"},
+	{"\\int", "∫"},
+	{"\\alpha", "α"},
+	{"\\beta", "β"},
+	{"\\gamma", "γ"},
+	{"\\Gamma", "Γ"},
+	{"\\delta", "δ"},
+	{"\\Delta", "Δ"},
+	{"\\epsilon", "ε"},
+	{"\\varepsilon", "ε"},
+	{"\\zeta", "ζ"},
+	{"\\eta", "η"},
+	{"\\theta", "θ"},
+	{"\\Theta", "Θ"},
+	{"\\lambda", "λ"},
+	{"\\Lambda", "Λ"},
+	{"\\mu", "μ"},
+	{"\\nu", "ν"},
+	{"\\xi", "ξ"},
+	{"\\Xi", "Ξ"},
+	{"\\pi", "π"},
+	{"\\Pi", "Π"},
+	{"\\rho", "ρ"},
+	{"\\sigma", "σ"},
+	{"\\Sigma", "Σ"},
+	{"\\tau", "τ"},
+	{"\\phi", "φ"},
+	{"\\varphi", "φ"},
+	{"\\Phi", "Φ"},
+	{"\\omega", "ω"},
+	{"\\Omega", "Ω"},
+	{"\\ldots", "..."},
+	{"\\dots", "..."},
+	{"\\quad", " "},
+	{"\\qquad", " "},
+})
+
+func newTexReplacer(pairs [][2]string) *strings.Replacer {
+	sort.SliceStable(pairs, func(i, j int) bool {
+		return len(pairs[i][0]) > len(pairs[j][0])
+	})
+
+	replacements := make([]string, 0, len(pairs)*2)
+	for _, pair := range pairs {
+		replacements = append(replacements, pair[0], pair[1])
+	}
+	return strings.NewReplacer(replacements...)
+}
 
 func normalizeMathText(text string) string {
 	if !looksLikeTex(text) {
 		return text
 	}
 
+	text = stripMathTags(text)
 	text = replaceTexCommandWithTwoGroups(text, "\\frac", "(%s)/(%s)")
 	text = replaceTexCommandWithOneGroup(text, "\\sqrt", "sqrt(%s)")
 	text = replaceTexCommandWithOneGroup(text, "\\overline", "overline(%s)")
@@ -564,12 +578,37 @@ func normalizeMathText(text string) string {
 		text = strings.ReplaceAll(text, command, "")
 	}
 
+	text = strings.NewReplacer(
+		"\\ ", " ",
+		"\\(", "(",
+		"\\)", ")",
+		"\\{", "{",
+		"\\}", "}",
+		"\\[", "[",
+		"\\]", "]",
+	).Replace(text)
 	text = normalizeGroupedScripts(text)
 	return strings.TrimSpace(normalizeInline(text))
 }
 
 func looksLikeTex(text string) bool {
-	return strings.Contains(text, "\\") || strings.Contains(text, "^{") || strings.Contains(text, "_{")
+	lower := strings.ToLower(text)
+	return strings.Contains(text, "\\") ||
+		strings.Contains(text, "^{") ||
+		strings.Contains(text, "_{") ||
+		strings.Contains(lower, "[math]") ||
+		strings.Contains(lower, "[/math]")
+}
+
+func stripMathTags(text string) string {
+	return strings.NewReplacer(
+		"[math]", "",
+		"[/math]", "",
+		"[Math]", "",
+		"[/Math]", "",
+		"[MATH]", "",
+		"[/MATH]", "",
+	).Replace(text)
 }
 
 func replaceTexCommandWithOneGroup(text string, command string, format string) string {

@@ -7,21 +7,13 @@ import (
 	"net/url"
 	"time"
 
-	parser "github.com/mereska0/itmowiki/backend/parser/html"
+	"github.com/mereska0/itmowiki/internal/domain"
+	parser "github.com/mereska0/itmowiki/internal/parser/html"
 )
-
-type Repository interface {
-	SavePage(title string, url string, html []byte) (int, error)
-	SaveDiscoveredPage(url string) (int, error)
-	GetPage(url string) (int, []byte, bool, error)
-
-	SaveKeyword(pageID int, keyword string, count int) error
-	SaveLink(fromID int, toID int, link string) error
-}
 
 type Service struct {
 	client http.Client
-	repo   Repository
+	repo   domain.PageRepository
 }
 
 type Progress struct {
@@ -31,7 +23,7 @@ type Progress struct {
 	Cached  bool
 }
 
-func NewService(repo Repository) *Service {
+func NewService(repo domain.PageRepository) *Service {
 	return &Service{
 		client: http.Client{
 			Timeout: 5 * time.Second,
@@ -46,7 +38,7 @@ pre: existing URL string
 post: byte array of HTML + error
 */
 func (s *Service) Fetch(rawURL string) ([]byte, error) {
-	time.Sleep(1 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
