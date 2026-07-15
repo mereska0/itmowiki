@@ -13,9 +13,10 @@ import (
 )
 
 type LocalStore struct {
-	mu   sync.Mutex
-	path string
-	data localData
+	mu    sync.Mutex
+	path  string
+	data  localData
+	dirty bool
 }
 
 type localData struct {
@@ -119,7 +120,11 @@ func (s *LocalStore) save() error {
 		return err
 	}
 
-	return os.Rename(tmpPath, s.path)
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		return err
+	}
+	s.dirty = false
+	return nil
 }
 
 func (s *LocalStore) SavePage(title string, url string, html []byte) (int, error) {
@@ -137,13 +142,15 @@ func (s *LocalStore) SavePage(title string, url string, html []byte) (int, error
 			CrawledAt: &now,
 		}
 		s.data.Pages = append(s.data.Pages, page)
-		return page.ID, s.save()
+		s.dirty = true
+		return page.ID, nil
 	}
 
 	s.data.Pages[index].Title = title
 	s.data.Pages[index].HTML = string(html)
 	s.data.Pages[index].CrawledAt = &now
-	return s.data.Pages[index].ID, s.save()
+	s.dirty = true
+	return s.data.Pages[index].ID, nil
 }
 
 func (s *LocalStore) SaveDiscoveredPage(url string) (int, error) {
@@ -160,7 +167,8 @@ func (s *LocalStore) SaveDiscoveredPage(url string) (int, error) {
 		URL: url,
 	}
 	s.data.Pages = append(s.data.Pages, page)
-	return page.ID, s.save()
+	s.dirty = true
+	return page.ID, nil
 }
 
 func (s *LocalStore) GetPage(url string) (int, []byte, bool, error) {
@@ -233,7 +241,8 @@ func (s *LocalStore) SaveKeyword(pageID int, keyword string, count int) error {
 		s.data.Keywords[pageID] = map[string]int{}
 	}
 	s.data.Keywords[pageID][keyword] = count
-	return s.save()
+	s.dirty = true
+	return nil
 }
 
 func (s *LocalStore) SaveLink(fromID int, toID int, link string) error {
@@ -243,7 +252,8 @@ func (s *LocalStore) SaveLink(fromID int, toID int, link string) error {
 	for index, existing := range s.data.Links {
 		if existing.FromID == fromID && existing.ToID == toID {
 			s.data.Links[index].Link = link
-			return s.save()
+			s.dirty = true
+			return nil
 		}
 	}
 
@@ -252,13 +262,17 @@ func (s *LocalStore) SaveLink(fromID int, toID int, link string) error {
 		ToID:   toID,
 		Link:   link,
 	})
-	return s.save()
+	s.dirty = true
+	return nil
 }
 
 func (s *LocalStore) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if !s.dirty {
+		return nil
+	}
 	return s.save()
 }
 

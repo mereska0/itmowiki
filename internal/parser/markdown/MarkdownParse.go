@@ -531,6 +531,8 @@ var texReplacer = newTexReplacer([][2]string{
 	{"\\ldots", "..."},
 	{"\\dots", "..."},
 	{"\\quad", " "},
+	{"\\langle", "〈"},
+	{"\\rangle", "〉"},
 	{"\\qquad", " "},
 })
 

@@ -8,6 +8,7 @@ It crawls pages from the ITMO wiki, stores them locally, lets you search through
 ## Features
 
 * Crawl ITMO Wikiconspects pages from the terminal
+* Crawl pages concurrently
 * Store crawled pages locally
 * Search pages by keywords
 * View saved pages in the terminal
@@ -41,6 +42,15 @@ You can also provide a custom start URL and page limit:
 
 ```bash
 itmowiki crawl "https://neerc.ifmo.ru/wiki/index.php?title=Заглавная_страница" 50
+```
+
+`crawl` runs pages concurrently by default, so indexing is faster than a
+one-page-at-a-time crawl.
+
+Usage:
+
+```text
+itmowiki crawl [url] [limit]
 ```
 
 ### Search pages

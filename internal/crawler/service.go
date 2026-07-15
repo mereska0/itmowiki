@@ -23,6 +23,18 @@ type Progress struct {
 	Cached  bool
 }
 
+type crawlJob struct {
+	URL string
+}
+
+type crawlResult struct {
+	URL    string
+	Page   *parser.HtmlPage
+	Links  []string
+	Cached bool
+	Err    error
+}
+
 func NewService(repo domain.PageRepository) *Service {
 	return &Service{
 		client: http.Client{
@@ -38,7 +50,6 @@ pre: existing URL string
 post: byte array of HTML + error
 */
 func (s *Service) Fetch(rawURL string) ([]byte, error) {
-	time.Sleep(500 * time.Millisecond)
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
@@ -111,15 +122,8 @@ func (s *Service) saveKeywords(pageID int, page *parser.HtmlPage) error {
 	return nil
 }
 
-func (s *Service) enqueueLinks(
-	pageID int,
-	page *parser.HtmlPage,
-	currentURL string,
-	startURL string,
-	queue *[]string,
-	visited map[string]bool,
-	queued map[string]bool,
-) error {
+func (s *Service) saveLinks(pageID int, page *parser.HtmlPage, currentURL string, startURL string) ([]string, error) {
+	links := []string{}
 	for _, rawLink := range page.GetLinks() {
 		resolvedLink := resolveLink(currentURL, rawLink)
 		if resolvedLink == "" {
@@ -127,26 +131,22 @@ func (s *Service) enqueueLinks(
 		}
 		toID, err := s.repo.SaveDiscoveredPage(resolvedLink)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := s.repo.SaveLink(
 			pageID,
 			toID,
 			resolvedLink,
 		); err != nil {
-			return err
+			return nil, err
 		}
 		if !sameHost(startURL, resolvedLink) {
 			continue
 		}
-		if visited[resolvedLink] || queued[resolvedLink] {
-			continue
-		}
-		*queue = append(*queue, resolvedLink)
-		queued[resolvedLink] = true
+		links = append(links, resolvedLink)
 	}
 
-	return nil
+	return links, nil
 }
 
 /*
@@ -163,75 +163,143 @@ func (s *Service) CrawlWithProgress(
 	maxPages int,
 	onProgress func(Progress),
 ) ([]*parser.HtmlPage, error) {
-	queue := []string{startURL}
+	return s.CrawlWithWorkers(startURL, maxPages, 1, onProgress)
+}
 
+func (s *Service) CrawlWithWorkers(
+	startURL string,
+	maxPages int,
+	workers int,
+	onProgress func(Progress),
+) ([]*parser.HtmlPage, error) {
+	if maxPages <= 0 {
+		return nil, nil
+	}
+	if workers <= 0 {
+		workers = 1
+	}
+	if workers > maxPages {
+		workers = maxPages
+	}
+
+	jobs := make(chan crawlJob)
+	results := make(chan crawlResult)
+	for i := 0; i < workers; i++ {
+		go func() {
+			for job := range jobs {
+				results <- s.crawlOne(startURL, job.URL)
+			}
+		}()
+	}
+
+	queue := []string{startURL}
 	visited := make(map[string]bool)
 	queued := map[string]bool{
 		startURL: true,
 	}
 	pages := make([]*parser.HtmlPage, 0, maxPages)
+	inFlight := 0
+	scheduled := 0
+	var firstErr error
 
-	for len(queue) > 0 && len(pages) < maxPages {
-		currentURL := queue[0]
-		queue = queue[1:]
-		if visited[currentURL] {
-			continue
+	sendJobs := func() {
+		if firstErr != nil {
+			return
 		}
-		visited[currentURL] = true
-		storedPageID, storedHTML, alreadyCrawled, err := s.repo.GetPage(currentURL)
-		if err != nil {
-			return nil, err
-		}
-
-		var pageID int
-		var page *parser.HtmlPage
-		cached := alreadyCrawled
-
-		if alreadyCrawled {
-			pageID = storedPageID
-			page = parser.Parse(storedHTML)
-		} else {
-			html, err := s.Fetch(currentURL)
-			if err != nil {
-				fmt.Printf("failed to fetch %s: %v\n", currentURL, err)
+		for len(queue) > 0 && inFlight < workers && scheduled < maxPages {
+			currentURL := queue[0]
+			queue = queue[1:]
+			if visited[currentURL] {
 				continue
 			}
-			page = parser.Parse(html)
-			pageID, err = s.repo.SavePage(
-				page.GetTitle(),
-				currentURL,
-				html,
-			)
-			if err != nil {
-				return nil, err
+			visited[currentURL] = true
+			inFlight++
+			scheduled++
+			jobs <- crawlJob{URL: currentURL}
+		}
+	}
+
+	sendJobs()
+	for inFlight > 0 {
+		result := <-results
+		inFlight--
+
+		if result.Err != nil {
+			if firstErr == nil {
+				firstErr = result.Err
+				queue = nil
 			}
-			if err := s.saveKeywords(pageID, page); err != nil {
-				return nil, err
+			continue
+		}
+		if result.Page != nil {
+			pages = append(pages, result.Page)
+			for _, link := range result.Links {
+				if queued[link] || visited[link] {
+					continue
+				}
+				if scheduled+len(queue) >= maxPages {
+					continue
+				}
+				queued[link] = true
+				queue = append(queue, link)
+			}
+			if onProgress != nil {
+				onProgress(Progress{
+					Current: len(pages),
+					Total:   maxPages,
+					URL:     result.URL,
+					Cached:  result.Cached,
+				})
 			}
 		}
 
-		pages = append(pages, page)
-		if err := s.enqueueLinks(
-			pageID,
-			page,
-			currentURL,
-			startURL,
-			&queue,
-			visited,
-			queued,
-		); err != nil {
-			return nil, err
-		}
-		if onProgress != nil {
-			onProgress(Progress{
-				Current: len(pages),
-				Total:   maxPages,
-				URL:     currentURL,
-				Cached:  cached,
-			})
-		}
+		sendJobs()
+	}
+
+	close(jobs)
+	if firstErr != nil {
+		return nil, firstErr
 	}
 	return pages, nil
+}
+
+func (s *Service) crawlOne(startURL string, currentURL string) crawlResult {
+	storedPageID, storedHTML, alreadyCrawled, err := s.repo.GetPage(currentURL)
+	if err != nil {
+		return crawlResult{URL: currentURL, Err: err}
+	}
+
+	var pageID int
+	var page *parser.HtmlPage
+	if alreadyCrawled {
+		pageID = storedPageID
+		page = parser.Parse(storedHTML)
+	} else {
+		html, err := s.Fetch(currentURL)
+		if err != nil {
+			return crawlResult{URL: currentURL}
+		}
+		page = parser.Parse(html)
+		pageID, err = s.repo.SavePage(page.GetTitle(), currentURL, html)
+		if err != nil {
+			return crawlResult{URL: currentURL, Err: err}
+		}
+		if err := s.saveKeywords(pageID, page); err != nil {
+			return crawlResult{URL: currentURL, Err: err}
+		}
+	}
+
+	links, err := s.saveLinks(pageID, page, currentURL, startURL)
+	if err != nil {
+		return crawlResult{URL: currentURL, Err: err}
+	}
+
+	return crawlResult{
+		URL:    currentURL,
+		Page:   page,
+		Links:  links,
+		Cached: alreadyCrawled,
+	}
 }
 
 func sameHost(startURL, resolvedLink string) bool {

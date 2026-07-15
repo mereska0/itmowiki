@@ -5,6 +5,8 @@ import (
 	"github.com/mereska0/itmowiki/internal/domain"
 )
 
+const DefaultCrawlWorkers = 8
+
 type CrawlUseCase struct {
 	crawler *service.Service
 }
@@ -27,7 +29,16 @@ func (u *CrawlUseCase) Execute(
 	limit int,
 	onProgress func(CrawlProgress),
 ) (int, error) {
-	pages, err := u.crawler.CrawlWithProgress(startURL, limit, func(p service.Progress) {
+	return u.ExecuteWithWorkers(startURL, limit, DefaultCrawlWorkers, onProgress)
+}
+
+func (u *CrawlUseCase) ExecuteWithWorkers(
+	startURL string,
+	limit int,
+	workers int,
+	onProgress func(CrawlProgress),
+) (int, error) {
+	pages, err := u.crawler.CrawlWithWorkers(startURL, limit, workers, func(p service.Progress) {
 		if onProgress != nil {
 			onProgress(CrawlProgress{
 				Current: p.Current,
