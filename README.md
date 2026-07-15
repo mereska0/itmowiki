@@ -16,6 +16,16 @@ It crawls pages from the ITMO wiki, stores them locally, lets you search through
 * No browser required
 * No external database required
 
+## Tech Stack
+
+* Go
+* `net/http`
+* Bubble Tea
+* Glamour
+* Local JSON storage
+* Homebrew
+
+
 ## Installation
 
 ### HomeBrew
