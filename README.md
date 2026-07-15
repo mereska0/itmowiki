@@ -11,7 +11,9 @@ It crawls pages from the ITMO wiki, stores them locally, lets you search through
 * Crawl pages concurrently
 * Store crawled pages locally
 * Search pages by keywords
+* Rank search results by title matches, keyword frequency, and incoming links
 * View saved pages in the terminal
+* Print local index statistics and link graph insights
 * Render HTML pages as readable Markdown
 * No browser required
 * No external database required
@@ -69,7 +71,14 @@ itmowiki crawl [url] [limit]
 itmowiki search алгоритмы
 ```
 
-The command prints matching pages with their IDs.
+The command prints matching pages with their IDs and relevance scores.
+
+Example:
+
+```text
+[5] Алгоритмы — score 42
+[19] Дискретная математика — score 18
+```
 
 ### Show a page
 
@@ -78,6 +87,22 @@ itmowiki show <page_id>
 ```
 
 The selected page will be rendered in the terminal.
+
+### Show index statistics
+
+```bash
+itmowiki stats
+```
+
+The command prints local index metrics, the most linked pages, and the most
+frequent indexed keywords:
+
+```text
+Pages discovered: 312
+Pages crawled: 100
+Links stored: 847
+Keywords indexed: 1830
+```
 
 ## License
 

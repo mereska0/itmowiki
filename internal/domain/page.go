@@ -7,6 +7,7 @@ type Page struct {
 	Title string
 	URL   string
 	HTML  []byte
+	Score int
 }
 
 var ErrPageNotFound = errors.New("page not found")

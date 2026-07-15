@@ -189,28 +189,61 @@ func (s *LocalStore) SearchPages(query string) ([]domain.Page, error) {
 	defer s.mu.Unlock()
 
 	query = strings.ToLower(query)
+	incomingLinks := s.incomingLinkCounts()
 	pages := []domain.Page{}
 	for _, page := range s.data.Pages {
 		if page.CrawledAt == nil {
 			continue
 		}
-		if !s.pageMatchesQuery(page, query) {
+		score := s.pageScore(page, query, incomingLinks[page.ID])
+		if score == 0 {
 			continue
 		}
 		pages = append(pages, domain.Page{
 			ID:    page.ID,
 			Title: page.Title,
 			URL:   page.URL,
+			Score: score,
 		})
 	}
 
 	sort.Slice(pages, func(i, j int) bool {
+		if pages[i].Score != pages[j].Score {
+			return pages[i].Score > pages[j].Score
+		}
 		if pages[i].Title == pages[j].Title {
 			return pages[i].ID < pages[j].ID
 		}
 		return pages[i].Title < pages[j].Title
 	})
 	return pages, nil
+}
+
+func (s *LocalStore) Stats() (domain.IndexStats, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stats := domain.IndexStats{
+		PagesDiscovered: len(s.data.Pages),
+		LinksStored:     len(s.data.Links),
+	}
+	for _, page := range s.data.Pages {
+		if page.CrawledAt != nil {
+			stats.PagesCrawled++
+		}
+	}
+
+	keywordTotals := make(map[string]int)
+	for _, keywords := range s.data.Keywords {
+		for keyword, count := range keywords {
+			keywordTotals[keyword] += count
+		}
+	}
+	stats.KeywordsIndexed = len(keywordTotals)
+	stats.TopKeywords = topKeywords(keywordTotals, 10)
+	stats.TopLinkedPages = s.topLinkedPages(10)
+
+	return stats, nil
 }
 
 func (s *LocalStore) GetPageByID(id int) (domain.Page, error) {
@@ -291,17 +324,83 @@ func (s *LocalStore) nextID() int {
 	return id
 }
 
-func (s *LocalStore) pageMatchesQuery(page localPage, query string) bool {
+func (s *LocalStore) pageScore(page localPage, query string, incomingLinks int) int {
+	score := 0
 	if strings.Contains(strings.ToLower(page.Title), query) {
-		return true
+		score += 10
 	}
 	if strings.Contains(strings.ToLower(page.URL), query) {
-		return true
+		score++
 	}
-	for keyword := range s.data.Keywords[page.ID] {
+	for keyword, count := range s.data.Keywords[page.ID] {
 		if strings.Contains(strings.ToLower(keyword), query) {
-			return true
+			score += count * 2
 		}
 	}
-	return false
+	if score > 0 {
+		score += incomingLinks
+	}
+	return score
+}
+
+func (s *LocalStore) incomingLinkCounts() map[int]int {
+	counts := make(map[int]int)
+	for _, link := range s.data.Links {
+		counts[link.ToID]++
+	}
+	return counts
+}
+
+func (s *LocalStore) topLinkedPages(limit int) []domain.LinkedPageStat {
+	incomingLinks := s.incomingLinkCounts()
+	pagesByID := make(map[int]localPage, len(s.data.Pages))
+	for _, page := range s.data.Pages {
+		pagesByID[page.ID] = page
+	}
+
+	top := make([]domain.LinkedPageStat, 0, len(incomingLinks))
+	for pageID, count := range incomingLinks {
+		page := pagesByID[pageID]
+		top = append(top, domain.LinkedPageStat{
+			PageID:        pageID,
+			Title:         page.Title,
+			URL:           page.URL,
+			IncomingLinks: count,
+		})
+	}
+
+	sort.Slice(top, func(i, j int) bool {
+		if top[i].IncomingLinks != top[j].IncomingLinks {
+			return top[i].IncomingLinks > top[j].IncomingLinks
+		}
+		if top[i].Title == top[j].Title {
+			return top[i].PageID < top[j].PageID
+		}
+		return top[i].Title < top[j].Title
+	})
+	if len(top) > limit {
+		return top[:limit]
+	}
+	return top
+}
+
+func topKeywords(keywordTotals map[string]int, limit int) []domain.KeywordStat {
+	top := make([]domain.KeywordStat, 0, len(keywordTotals))
+	for keyword, count := range keywordTotals {
+		top = append(top, domain.KeywordStat{
+			Keyword: keyword,
+			Count:   count,
+		})
+	}
+
+	sort.Slice(top, func(i, j int) bool {
+		if top[i].Count != top[j].Count {
+			return top[i].Count > top[j].Count
+		}
+		return top[i].Keyword < top[j].Keyword
+	})
+	if len(top) > limit {
+		return top[:limit]
+	}
+	return top
 }

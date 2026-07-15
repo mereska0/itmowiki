@@ -44,6 +44,7 @@ func main() {
 	searchUseCase := app.NewSearchUseCase(store)
 	showUseCase := app.NewShowUseCase(store)
 	crawlUseCase := app.NewCrawlUseCase(store)
+	statsUseCase := app.NewStatsUseCase(store)
 	pageRenderer := cli.NewPageRenderer("dark")
 
 	switch command {
@@ -53,6 +54,8 @@ func main() {
 		runCrawl(crawlUseCase, os.Args[2:])
 	case "show":
 		runShow(showUseCase, pageRenderer, os.Args[2:])
+	case "stats":
+		runStats(statsUseCase, os.Args[2:])
 	default:
 		fmt.Printf("Неизвестная команда: %s\n\n", command)
 		printHelp()
@@ -73,6 +76,7 @@ func printHome() {
   itmowiki show <id>
   itmowiki crawl
   itmowiki crawl <url> [limit]
+  itmowiki stats
   itmowiki help
 `)
 }
@@ -86,6 +90,7 @@ func printHelp() {
   itmowiki show <id>
   itmowiki crawl
   itmowiki crawl <url> [limit]
+  itmowiki stats
 
 Примеры:
   itmowiki search алгоритмы
@@ -93,6 +98,7 @@ func printHelp() {
   itmowiki show 15
   itmowiki crawl
   itmowiki crawl "https://neerc.ifmo.ru/wiki/index.php?title=Заглавная_страница" 20
+  itmowiki stats
 `)
 }
 
@@ -121,7 +127,7 @@ func runSearch(searchUseCase *app.SearchUseCase, args []string) {
 			title = "(без заголовка)"
 		}
 
-		fmt.Printf("[%d] %s\n", result.ID, title)
+		fmt.Printf("[%d] %s — score %d\n", result.ID, title, result.Score)
 		fmt.Println(result.URL)
 		fmt.Println()
 	}
@@ -182,5 +188,48 @@ func runCrawl(crawlUseCase *app.CrawlUseCase, args []string) {
 
 	if err := cli.RunCrawlTUI(crawlUseCase, startURL, limit); err != nil {
 		log.Fatal("crawl failed:", err)
+	}
+}
+
+func runStats(statsUseCase *app.StatsUseCase, args []string) {
+	if len(args) != 0 {
+		log.Fatal("Использование: itmowiki stats")
+	}
+
+	stats, err := statsUseCase.Execute()
+	if err != nil {
+		log.Fatal("stats failed:", err)
+	}
+
+	fmt.Printf("Pages discovered: %d\n", stats.PagesDiscovered)
+	fmt.Printf("Pages crawled: %d\n", stats.PagesCrawled)
+	fmt.Printf("Links stored: %d\n", stats.LinksStored)
+	fmt.Printf("Keywords indexed: %d\n", stats.KeywordsIndexed)
+
+	fmt.Println()
+	fmt.Println("Top linked pages:")
+	if len(stats.TopLinkedPages) == 0 {
+		fmt.Println("Ничего не найдено")
+	} else {
+		for _, page := range stats.TopLinkedPages {
+			title := page.Title
+			if title == "" {
+				title = page.URL
+			}
+			if title == "" {
+				title = "(без заголовка)"
+			}
+			fmt.Printf("[%d] %s — %d incoming links\n", page.PageID, title, page.IncomingLinks)
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("Top keywords:")
+	if len(stats.TopKeywords) == 0 {
+		fmt.Println("Ничего не найдено")
+		return
+	}
+	for _, keyword := range stats.TopKeywords {
+		fmt.Printf("%s — %d\n", keyword.Keyword, keyword.Count)
 	}
 }
